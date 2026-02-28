@@ -1,0 +1,26 @@
+# Web framework
+fastapi==0.110.0
+uvicorn==0.29.0
+
+# Data collection
+feedparser==6.0.11
+newspaper3k==0.2.8
+requests==2.31.0
+beautifulsoup4==4.12.2
+
+# Deduplication
+rapidfuzz==3.6.1
+sentence-transformers==2.7.0
+
+# Scheduling
+APScheduler==3.10.4
+
+# Database
+sqlalchemy==2.0.28
+psycopg2-binary==2.9.9
+alembic==1.13.1
+
+# Utilities
+python-dotenv==1.0.1
+langdetect==1.0.9
+pydantic==2.6.4

@@ -1,0 +1,1 @@
+# Arabic Normalizer module
