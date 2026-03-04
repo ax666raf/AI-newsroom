@@ -13,7 +13,7 @@ from backend.collector.sources import ARABIC_RSS_SOURCES
 from backend.collector.arabic_normalizer import normalize_arabic
 
 
-# Keywords for "Algeria" in Arabic (include variants that appear after normalization)
+# Keywords for "Algeria" in Arabic
 ALGERIA_KEYWORDS_AR = [
     # core identifiers
     "الجزاير",
@@ -311,16 +311,16 @@ def collect_arabic_rss(limit_per_source: int = 50) -> List[Dict[str, Any]]:
     return articles
 
 
-if __name__ == "__main__":
-    results = collect_arabic_rss()
+# if __name__ == "__main__":
+#     results = collect_arabic_rss()
 
-    print(f"\nCollected Algeria-related Arabic RSS items: {len(results)}\n")
+#     print(f"\nCollected Algeria-related Arabic RSS items: {len(results)}\n")
 
-    for r in results[:10]:
-        print("SOURCE:", r["source_name"])
-        print("TITLE:", r["title_raw"])
-        print("TITLE_norm:", r["title_norm"])
-        print("DESCRIPTION:", r["summary_raw"])
-        print("URL:", r["url"])
-        print("PUBLISHED:", r["published"])
-        print("-" * 60)
+#     for r in results[:10]:
+#         print("SOURCE:", r["source_name"])
+#         print("TITLE:", r["title_raw"])
+#         print("TITLE_norm:", r["title_norm"])
+#         print("DESCRIPTION:", r["summary_raw"])
+#         print("URL:", r["url"])
+#         print("PUBLISHED:", r["published"])
+#         print("-" * 60)
