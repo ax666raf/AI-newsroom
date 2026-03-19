@@ -311,6 +311,36 @@ def collect_arabic_rss(limit_per_source: int = 50) -> List[Dict[str, Any]]:
     return articles
 
 
+def fetch_all_rss(limit_per_source: int = 50) -> List[Dict[str, Any]]:
+    """
+    Fetch RSS articles from all available sources.
+    
+    Currently only Arabic sources are configured. Can be extended
+    to support French and English sources in the future.
+    
+    Args:
+        limit_per_source: Max articles per source (default 50).
+    
+    Returns:
+        Aggregated list of article dicts from all RSS sources.
+    """
+    logger.info("Fetching articles from all RSS sources")
+    all_articles = []
+    
+    # Arabic RSS sources
+    arabic_articles = collect_arabic_rss(limit_per_source=limit_per_source)
+    all_articles.extend(arabic_articles)
+    
+    # More languages can be added here as sources are configured
+    # french_articles = collect_french_rss(limit_per_source=limit_per_source)
+    # all_articles.extend(french_articles)
+    # english_articles = collect_english_rss(limit_per_source=limit_per_source)
+    # all_articles.extend(english_articles)
+    
+    logger.info("RSS collection complete: %d articles from all sources", len(all_articles))
+    return all_articles
+
+
 # if __name__ == "__main__":
 #     results = collect_arabic_rss()
 

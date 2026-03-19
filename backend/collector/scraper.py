@@ -111,3 +111,52 @@ def scrape_multiple(urls, language="fr"):
         if article:
             results.append(article)
     return results
+
+
+def enrich_articles(articles: list[dict]) -> list[dict]:
+    """
+    Enrich articles by scraping full text for those missing it.
+    
+    Takes a list of article dicts (typically from RSS/API collectors)
+    and attempts to scrape full text content for articles that don't
+    already have it.  Returns the enriched articles.
+    
+    Articles that fail scraping are returned as-is (with whatever
+    summary/text they already had).
+    
+    Args:
+        articles: List of article dicts (must have 'url', 'language').
+    
+    Returns:
+        List of enriched article dicts with full_text populated where possible.
+    """
+    logger.info("Starting article enrichment (%d articles)", len(articles))
+    enriched = []
+    scraped_count = 0
+    
+    for article in articles:
+        url = article.get("url")
+        language = article.get("language", "fr")
+        
+        # Skip if already has substantial full_text
+        existing_text = article.get("full_text", "")
+        if existing_text and len(existing_text) > 200:
+            enriched.append(article)
+            continue
+        
+        # Try to scrape
+        if url:
+            scraped = scrape_article(url, language)
+            if scraped and scraped.get("full_text"):
+                # Merge scraped data into article
+                article["full_text"] = scraped.get("full_text")
+                article["authors"] = scraped.get("authors", [])
+                if scraped.get("published_at"):
+                    article["published_at"] = scraped.get("published_at")
+                scraped_count += 1
+                logger.debug(f"Scraped full text for {url}")
+        
+        enriched.append(article)
+    
+    logger.info("Article enrichment complete: %d articles scraped", scraped_count)
+    return enriched
