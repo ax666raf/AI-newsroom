@@ -1,70 +1,112 @@
-"""
-arabic_normalizer.py — Unicode normalisation for Arabic text.
-
-Algerian news sources mix several Arabic orthographic conventions:
-  • Different forms of Alef (أ إ آ ا)
-  • Teh Marbuta (ة) vs Heh (ه)
-  • Yeh (ي) vs Alef Maksura (ى)
-  • Tatweel / Kashida decoration (ـ)
-  • Diacritics (harakat تشكيل)
-
-Normalising these ensures deduplication works correctly even when
-two sources write the same word differently.
-"""
+# Arabic Normalizer module
+# backend/collector/arabic_normalizer.py
+from __future__ import annotations
 
 import re
 import unicodedata
+from typing import Dict
 
-# Map variant Alef forms → plain Alef
-_ALEF_VARIANTS = str.maketrans({
-    "\u0623": "\u0627",  # أ → ا
-    "\u0625": "\u0627",  # إ → ا
-    "\u0622": "\u0627",  # آ → ا
-    "\u0671": "\u0627",  # ٱ → ا
-})
+from langdetect import detect, LangDetectException
 
-# Arabic diacritics (short vowels / tanwin) — strip for comparison
-_DIACRITICS_PATTERN = re.compile(
-    r"[\u064B-\u065F\u0670]"
-)
+_DIACRITICS_RE = re.compile(r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]")
+_TATWEEL_RE = re.compile(r"\u0640+")
+_WS_RE = re.compile(r"\s+")
 
-# Tatweel / Kashida elongation mark
-_TATWEEL = "\u0640"
+# Lam-Alef ligatures -> "لا"
+_LAMALEF_MAP = {
+    "\ufefb": "لا",  # ﻻ
+    "\ufef7": "لا",  # ﻷ
+    "\ufef9": "لا",  # ﻹ
+    "\ufef5": "لا",  # ﻵ
+}
+
+_ALEF_MAP = {"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا"}
+
+# Mild hamza normalization for matching (keep standalone hamza "ء" to preserve text)
+_HAMZA_MILD_MAP = {"ؤ": "و", "ئ": "ي"}
 
 
-def normalize_arabic(text: str) -> str:
-    """
-    Normalise Arabic text for storage and comparison.
+def normalize_unicode(text: str) -> str:
+    return unicodedata.normalize("NFC", text)
 
-    Steps:
-      1. Unicode NFC normalisation
-      2. Remove tatweel (decorative elongation)
-      3. Remove diacritics (harakat)
-      4. Unify Alef variants
-      5. Normalise Teh Marbuta → Heh  (for dedup only; stored as-is)
-      6. Normalise Yeh / Alef Maksura
-      7. Collapse multiple whitespace
-    """
-    if not text:
-        return text
 
-    text = unicodedata.normalize("NFC", text)
-    text = text.replace(_TATWEEL, "")
-    text = _DIACRITICS_PATTERN.sub("", text)
-    text = text.translate(_ALEF_VARIANTS)
-    # Teh Marbuta → Heh (helps dedup across dialects)
-    text = text.replace("\u0629", "\u0647")  # ة → ه
-    # Alef Maksura → Yeh
-    text = text.replace("\u0649", "\u064A")  # ى → ي
-    text = re.sub(r"\s+", " ", text).strip()
+def remove_diacritics(text: str) -> str:
+    return _DIACRITICS_RE.sub("", text)
+
+
+def remove_tatweel(text: str) -> str:
+    return _TATWEEL_RE.sub("", text)
+
+
+def normalize_lamalef(text: str) -> str:
+    for k, v in _LAMALEF_MAP.items():
+        text = text.replace(k, v)
     return text
 
 
-def normalize_for_dedup(text: str) -> str:
+def standardize_alef(text: str) -> str:
+    for k, v in _ALEF_MAP.items():
+        text = text.replace(k, v)
+    return text
+
+
+def standardize_yeh(text: str) -> str:
+    return text.replace("ى", "ي")
+
+
+def standardize_teh_marbuta(text: str) -> str:
+    # combined mode: convert ة -> ه for stronger matching
+    return text.replace("ة", "ه")
+
+
+def normalize_hamza_mild(text: str) -> str:
+    for k, v in _HAMZA_MILD_MAP.items():
+        text = text.replace(k, v)
+    return text
+
+
+def clean_whitespace(text: str) -> str:
+    return _WS_RE.sub(" ", text).strip()
+
+
+def detect_language(text: str) -> str:
+    if not text:
+        return "unknown"
+    s = text.strip()
+    if len(s) < 30:
+        return "unknown"
+    try:
+        return detect(s)
+    except (LangDetectException, Exception):
+        return "unknown"
+
+
+def normalize_arabic(text: str | None, do_lang_detect: bool = True) -> Dict[str, str]:
     """
-    Aggressive normalisation used only for duplicate detection.
-    Lower-cases Latin portions and strips all punctuation.
+    Single combined Arabic normalization mode:
+    - NFC unicode
+    - remove tatweel
+    - remove diacritics
+    - normalize lam-alef ligatures
+    - normalize alef variants
+    - normalize ى -> ي
+    - normalize ة -> ه
+    - normalize mild hamza: ؤ -> و, ئ -> ي
+    - whitespace cleanup
+    - optional language detect
     """
-    text = normalize_arabic(text)
-    text = re.sub(r"[^\w\s\u0600-\u06FF]", "", text, flags=re.UNICODE)
-    return text.lower().strip()
+    if text is None:
+        text = ""
+
+    t = normalize_unicode(text)
+    t = remove_tatweel(t)
+    t = remove_diacritics(t)
+    t = normalize_lamalef(t)
+    t = standardize_alef(t)
+    t = standardize_yeh(t)
+    t = standardize_teh_marbuta(t)
+    t = normalize_hamza_mild(t)
+    t = clean_whitespace(t)
+
+    lang = detect_language(t) if do_lang_detect else "unknown"
+    return {"text": t, "language": lang}
