@@ -1,8 +1,7 @@
-"""
-runner.py — Orchestrates the full collection → deduplication pipeline.
+"""runner.py — Orchestrates the full collection → deduplication pipeline.
 
 Pipeline steps:
-  1. Collect  — RSS feeds + NewsAPI across ar/fr/en
+  1. Collect  — RSS feeds (ar/en) + NewsAPI (ar/fr/en)
   2. Enrich   — Scrape full text for articles missing it
   3. Deduplicate — URL hash check, then fuzzy/semantic dedup
   4. Persist  — Save new articles to the database

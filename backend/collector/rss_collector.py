@@ -3,14 +3,17 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Set
 import time
+import logging
 
 import feedparser
 
 import re
 from bs4 import BeautifulSoup
 
-from backend.collector.sources import ARABIC_RSS_SOURCES
+from backend.collector.sources import ARABIC_RSS_SOURCES, ENGLISH_RSS_SOURCES, ENGLISH_ALGERIA_KEYWORDS
 from backend.collector.arabic_normalizer import normalize_arabic
+
+logger = logging.getLogger(__name__)
 
 
 # Keywords for "Algeria" in Arabic
@@ -311,15 +314,89 @@ def collect_arabic_rss(limit_per_source: int = 50) -> List[Dict[str, Any]]:
     return articles
 
 
+def is_algeria_related_en(title_en: str, body_en: str) -> bool:
+    """Check if an English article is about Algeria by keyword matching."""
+    haystack = f"{title_en} {body_en}".strip().lower()
+    if not haystack:
+        return False
+    return any(k in haystack for k in ENGLISH_ALGERIA_KEYWORDS)
+
+
+def collect_english_rss(limit_per_source: int = 50) -> List[Dict[str, Any]]:
+    """
+    Collect English RSS items for Algeria-related news.
+
+    International sources (Al Jazeera, BBC, Reuters, etc.) are checked
+    against Algeria keywords. Returns a list of dicts with article content.
+
+    Args:
+        limit_per_source: Max articles per RSS feed (default 50).
+
+    Returns:
+        List of article dicts in standardized format.
+    """
+    articles: List[Dict[str, Any]] = []
+    seen_urls: Set[str] = set()
+
+    for src in ENGLISH_RSS_SOURCES:
+        source_name = src.get("name", "Unknown Source")
+        rss_url = src.get("rss_url", "")
+        language = src.get("language", "en")
+        region = src.get("region", "international")
+
+        if not rss_url:
+            continue
+
+        feed = feedparser.parse(rss_url)
+        entries = getattr(feed, "entries", []) or []
+        if not entries:
+            continue
+
+        for entry in entries[:limit_per_source]:
+            title_raw = _safe_get(entry, "title", "")
+            summary_raw_html = _extract_summary(entry)
+            summary_raw_text = _remove_boilerplate(_html_to_text(summary_raw_html))
+            link = _extract_link(entry)
+            published = _extract_published(entry)
+
+            # Skip junk entries
+            if not title_raw and not link:
+                continue
+
+            # Local dedup by URL
+            if link and link in seen_urls:
+                continue
+            if link:
+                seen_urls.add(link)
+
+            # Algeria keyword filter
+            if not is_algeria_related_en(title_raw, summary_raw_text):
+                continue
+
+            articles.append({
+                "source_name": source_name,
+                "source_rss": rss_url,
+                "language": language,
+                "region": region,
+                "title": title_raw.strip(),
+                "summary": summary_raw_text.strip(),
+                "url": link,
+                "published": published,
+            })
+
+    return articles
+
+
 def fetch_all_rss(limit_per_source: int = 50) -> List[Dict[str, Any]]:
     """
-    Fetch RSS articles from all available sources.
+    Fetch RSS articles from all available sources (Arabic + English).
     
-    Currently only Arabic sources are configured. Can be extended
-    to support French and English sources in the future.
+    Aggregates content from:
+    - Arabic RSS feeds (algerian local sources)
+    - English RSS feeds (international sources filtered for Algeria content)
     
     Args:
-        limit_per_source: Max articles per source (default 50).
+        limit_per_source: Max articles per RSS feed.
     
     Returns:
         Aggregated list of article dicts from all RSS sources.
@@ -328,14 +405,16 @@ def fetch_all_rss(limit_per_source: int = 50) -> List[Dict[str, Any]]:
     all_articles = []
     
     # Arabic RSS sources
+    logger.info("Collecting Arabic RSS articles...")
     arabic_articles = collect_arabic_rss(limit_per_source=limit_per_source)
     all_articles.extend(arabic_articles)
+    logger.info("✓ Arabic RSS: %d articles", len(arabic_articles))
     
-    # More languages can be added here as sources are configured
-    # french_articles = collect_french_rss(limit_per_source=limit_per_source)
-    # all_articles.extend(french_articles)
-    # english_articles = collect_english_rss(limit_per_source=limit_per_source)
-    # all_articles.extend(english_articles)
+    # English RSS sources
+    logger.info("Collecting English RSS articles...")
+    english_articles = collect_english_rss(limit_per_source=limit_per_source)
+    all_articles.extend(english_articles)
+    logger.info("✓ English RSS: %d articles", len(english_articles))
     
     logger.info("RSS collection complete: %d articles from all sources", len(all_articles))
     return all_articles

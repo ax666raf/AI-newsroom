@@ -17,7 +17,7 @@ from typing import Optional
 
 import requests
 
-from backend.config import settings
+from backend.config import NEWSAPI_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ def fetch_newsapi(language: str, days_back: int = 1) -> list[dict]:
     Returns:
         list of raw article dicts compatible with rss_collector output.
     """
-    if not getattr(settings, "NEWSAPI_KEY", None):
+    if not NEWSAPI_KEY:
         logger.warning("NEWSAPI_KEY not set — skipping API collection for %s", language)
         return []
 
@@ -71,7 +71,7 @@ def fetch_newsapi(language: str, days_back: int = 1) -> list[dict]:
         "from": from_date,
         "sortBy": "publishedAt",
         "pageSize": 100,
-        "apiKey": settings.NEWSAPI_KEY,
+        "apiKey": NEWSAPI_KEY,
     }
 
     try:
