@@ -34,7 +34,7 @@ NEWSAPI_LANGUAGES = {"ar", "fr", "en"}
 
 
 def _hash_url(url: str) -> str:
-    return hashlib.sha256(url.strip().lower().encode()).hexdigest()
+    return hashlib.md5(url.strip().lower().encode(), usedforsecurity=False).hexdigest()
 
 
 def _build_query(language: str) -> str:

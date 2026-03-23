@@ -1,5 +1,5 @@
 """
-url_hash.py — Level 1 Deduplication: exact URL matching via SHA-256.
+url_hash.py — Level 1 Deduplication: exact URL matching via MD5.
 
 This is the FASTEST dedup layer.  Before any fuzzy or semantic check,
 we hash every incoming URL and compare it against hashes already in
@@ -10,7 +10,6 @@ Complexity: O(n) with a single DB round-trip for the whole batch.
 
 import hashlib
 import logging
-from typing import Sequence
 
 from sqlalchemy import select
 
@@ -22,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def compute_url_hash(url: str) -> str:
     """
-    Produce a deterministic SHA-256 hex digest for a URL.
+    Produce a deterministic MD5 hex digest for a URL.
 
     Normalises the URL first:
       • strip whitespace
@@ -30,7 +29,7 @@ def compute_url_hash(url: str) -> str:
       • remove trailing slash
     """
     normalised = url.strip().lower().rstrip("/")
-    return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
+    return hashlib.md5(normalised.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def filter_known_urls(articles: list[dict]) -> list[dict]:
@@ -52,9 +51,15 @@ def filter_known_urls(articles: list[dict]) -> list[dict]:
 
     # (Re-)compute hashes with our canonical normalisation
     for article in articles:
-        article["url_hash"] = compute_url_hash(article["url"])
+        url = article.get("url", "")
+        if not url:
+            continue
+        article["url_hash"] = compute_url_hash(url)
 
-    incoming_hashes = {a["url_hash"] for a in articles}
+    incoming_hashes = {a["url_hash"] for a in articles if a.get("url_hash")}
+
+    if not incoming_hashes:
+        return []
 
     # Single query: fetch all hashes that already exist
     with get_db_session() as session:

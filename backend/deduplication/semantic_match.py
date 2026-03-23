@@ -27,7 +27,6 @@ from backend.database.db import get_db_session
 from backend.database.models import Article, StoryGroup
 from backend.ai_processing.vector_store import (
     find_similar_by_article_id,
-    generate_embedding,
 )
 
 logger = logging.getLogger(__name__)
@@ -181,6 +180,39 @@ def group_unprocessed_articles(limit: int = 200) -> dict:
         "groups_extended": processed - groups_created,
     }
     logger.info("Grouping complete: %s", summary)
+    return summary
+
+
+def group_article_ids(article_ids: list[int]) -> dict:
+    """
+    Group a provided list of article IDs.
+
+    This is used during ingestion so newly saved articles can be grouped
+    immediately instead of waiting for a background pass.
+    """
+    if not article_ids:
+        return {"processed": 0, "groups_created": 0, "groups_extended": 0}
+
+    with get_db_session() as session:
+        groups_before = session.scalar(select(func.count(StoryGroup.id)))
+
+    processed = 0
+    for aid in article_ids:
+        result = assign_article_to_group(aid)
+        if result is not None:
+            processed += 1
+
+    with get_db_session() as session:
+        groups_after = session.scalar(select(func.count(StoryGroup.id)))
+
+    groups_created = groups_after - groups_before
+
+    summary = {
+        "processed": processed,
+        "groups_created": groups_created,
+        "groups_extended": processed - groups_created,
+    }
+    logger.info("Direct grouping complete: %s", summary)
     return summary
 
 
