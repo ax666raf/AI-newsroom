@@ -7,7 +7,7 @@ Tables:
   collection_logs — Audit trail for pipeline runs
 
 Key design decisions:
-  • url_hash (SHA-256)   → Level 1 dedup: instant, exact-URL duplicate rejection
+    • url_hash (MD5)       → Level 1 dedup: instant, exact-URL duplicate rejection
   • embedding (vector)   → Level 3 dedup + RAG retrieval via pgvector
   • group_id FK          → Links an article to its StoryGroup cluster
   • Indexes on url_hash, language, group_id for fast lookups
@@ -44,7 +44,7 @@ class Article(Base):
     id           = Column(Integer, primary_key=True, autoincrement=True)
     title        = Column(String(500), nullable=False)
     url          = Column(String(1000), nullable=False, unique=True)
-    url_hash     = Column(String(64), nullable=False, unique=True, index=True)
+    url_hash     = Column(String(32), nullable=False, unique=True, index=True)
     full_text    = Column(Text, nullable=True)
     summary      = Column(Text, nullable=True)            # AI-generated summary (filled later)
     source_name  = Column(String(200), nullable=False)

@@ -15,15 +15,14 @@ The model 'paraphrase-multilingual-MiniLM-L12-v2' was chosen because:
 """
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import numpy as np
-from pgvector.sqlalchemy import Vector
 from sentence_transformers import SentenceTransformer
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from backend.database.db import get_db_session
-from backend.database.models import Article, StoryGroup
+from backend.database.models import Article
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +165,7 @@ def find_similar_articles(
     limit: int = 10,
     language: Optional[str] = None,
     similarity_threshold: float = 0.65,
+    hours_back: Optional[int] = 168,
 ) -> list[dict]:
     """
     Semantic search: find articles most similar to a query string.
@@ -176,7 +176,8 @@ def find_similar_articles(
         query_text:           Natural language query or article text.
         limit:                Max results to return.
         language:             Filter by language code (optional).
-        similarity_threshold: Minimum cosine similarity (0–1).
+        similarity_threshold: Minimum cosine similarity (0-1).
+        hours_back: Restrict search to recently collected articles.
 
     Returns:
         List of dicts: {id, title, url, source_name, language, similarity}
@@ -204,9 +205,13 @@ def find_similar_articles(
         if language:
             stmt = stmt.where(Article.language == language)
 
+        if hours_back is not None:
+            window_start = datetime.now(timezone.utc) - timedelta(hours=hours_back)
+            stmt = stmt.where(Article.collected_at >= window_start)
+
         stmt = (
             stmt
-            .having((1 - distance_expr) >= similarity_threshold)
+            .where((1 - distance_expr) >= similarity_threshold)
             .order_by(distance_expr)
             .limit(limit)
         )
@@ -230,6 +235,7 @@ def find_similar_by_article_id(
     article_id: int,
     limit: int = 10,
     similarity_threshold: float = 0.70,
+    hours_back: Optional[int] = 168,
 ) -> list[dict]:
     """
     Find articles semantically similar to an existing article.
@@ -244,6 +250,8 @@ def find_similar_by_article_id(
         query_emb = article.embedding
         distance_expr = Article.embedding.cosine_distance(query_emb)
 
+        anchor_time = article.collected_at or datetime.now(timezone.utc)
+
         stmt = (
             select(
                 Article.id,
@@ -254,10 +262,14 @@ def find_similar_by_article_id(
             )
             .where(Article.embedding.isnot(None))
             .where(Article.id != article_id)              # exclude self
-            .having((1 - distance_expr) >= similarity_threshold)
+            .where((1 - distance_expr) >= similarity_threshold)
             .order_by(distance_expr)
             .limit(limit)
         )
+
+        if hours_back is not None:
+            window_start = anchor_time - timedelta(hours=hours_back)
+            stmt = stmt.where(Article.collected_at >= window_start)
 
         rows = session.execute(stmt).all()
         return [

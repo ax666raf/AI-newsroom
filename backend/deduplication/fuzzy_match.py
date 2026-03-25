@@ -18,9 +18,8 @@ from rapidfuzz import fuzz
 
 logger = logging.getLogger(__name__)
 
-# Threshold: 0–100.  80+ means "almost certainly the same story".
-# Tuned conservatively — raise to 85 if you see false positives.
-SIMILARITY_THRESHOLD = 80
+# Threshold: 0-100. 75 balances recall/precision for multilingual headlines.
+SIMILARITY_THRESHOLD = 75
 
 
 def _normalise_title(title: str) -> str:

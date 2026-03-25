@@ -1,100 +1,162 @@
-"""
-scraper.py — Full-text article scraper (fallback / enrichment).
-
-When RSS gives only a title + short summary, this module
-visits the article URL and extracts the full body text.
-
-Uses `newspaper3k` (newspaper library) which:
-  • Works for Arabic, French, and English
-  • Handles encoding automatically
-  • Extracts publish date, author, and main image URL
-
-This is intentionally slow and runs AFTER initial collection so
-we only scrape articles that survive deduplication.
-"""
-
 import logging
-import time
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime
+from urllib.parse import urlparse
+from newspaper import Article, Config
 
 try:
-    from newspaper import Article as NewspaperArticle
-    from newspaper import ArticleException
-    NEWSPAPER_AVAILABLE = True
+    from backend.collector.apify_collector import apify_scrape, needs_apify
 except ImportError:
-    NEWSPAPER_AVAILABLE = False
+    from collector.apify_collector import apify_scrape, needs_apify
 
 logger = logging.getLogger(__name__)
 
-# Polite delay between requests (seconds)
-SCRAPE_DELAY = 1.5
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
-# Maximum characters to keep from full text
-MAX_FULL_TEXT = 8000
+
+def _build_config(language="fr"):
+    cfg = Config()
+    cfg.browser_user_agent = USER_AGENT
+    cfg.request_timeout = 15
+    cfg.language = language
+    cfg.fetch_images = False
+    cfg.memoize_articles = False
+    return cfg
 
 
-def scrape_article(url: str, language: str = "en") -> Optional[dict]:
-    """
-    Fetch and parse the full text of one article URL.
+def scrape_article(url, language="fr"):
+    if needs_apify(url):
+        logger.info(f"known blocked domain, going straight to apify for {url}")
+        result = _try_apify(url)
+        if result:
+            return result
 
-    Returns a dict with enrichment fields, or None on failure:
-      {full_text, published_at, top_image}
-    """
-    if not NEWSPAPER_AVAILABLE:
-        logger.warning("newspaper3k not installed — scraping disabled")
-        return None
+    result = _try_newspaper(url, language)
+    if result and result.get("full_text") and len(result["full_text"]) > 150:
+        return result
 
-    # Map language codes to newspaper's language param
-    lang_map = {"ar": "ar", "fr": "fr", "en": "en"}
-    nlp_lang = lang_map.get(language, "en")
+    logger.info(f"newspaper3k failed or too short for {url}, trying apify")
+    result = _try_apify(url)
+    if result:
+        return result
 
+    logger.warning(f"all extraction methods failed for {url}")
+    return None
+
+
+def _try_newspaper(url, language):
     try:
-        article = NewspaperArticle(url, language=nlp_lang, request_timeout=10)
+        cfg = _build_config(language)
+        article = Article(url, config=cfg)
         article.download()
         article.parse()
-    except ArticleException as exc:
-        logger.debug("Scrape failed for %s: %s", url, exc)
-        return None
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Unexpected scrape error for %s: %s", url, exc)
+
+        return {
+            "title": article.title,
+            "url": url,
+            "full_text": article.text,
+            "authors": article.authors,
+            "published_at": article.publish_date,
+            "source_name": _extract_domain(url),
+            "language": language,
+            "collected_at": datetime.utcnow(),
+        }
+    except Exception as e:
+        logger.debug(f"newspaper3k error for {url}: {e}")
         return None
 
-    full_text = (article.text or "").strip()[:MAX_FULL_TEXT]
-    if not full_text:
+
+def _try_apify(url):
+    try:
+        data = apify_scrape(url)
+        if not data or not data.get("text"):
+            return None
+        return {
+            "title": data.get("title", ""),
+            "url": url,
+            "full_text": data.get("text", ""),
+            "authors": [],
+            "published_at": data.get("published_at"),
+            "source_name": data.get("source_name", _extract_domain(url)),
+            "language": data.get("language", _detect_lang(data.get("text", ""))),
+            "collected_at": datetime.utcnow(),
+        }
+    except Exception as e:
+        logger.debug(f"apify fallback error for {url}: {e}")
         return None
 
-    published_at = None
-    if article.publish_date:
-        try:
-            published_at = article.publish_date.replace(tzinfo=timezone.utc)
-        except Exception:
-            pass
 
-    return {
-        "full_text":    full_text,
-        "published_at": published_at,
-        "top_image":    article.top_image or None,
-    }
+def _detect_lang(text):
+    if not text or len(text) < 30:
+        return "fr"
+    try:
+        from langdetect import detect
+        return detect(text)
+    except Exception:
+        return "fr"
+
+
+def _extract_domain(url):
+    parsed = urlparse(url)
+    domain = parsed.netloc.replace("www.", "")
+    return domain
+
+
+def scrape_multiple(urls, language="fr"):
+    results = []
+    for url in urls:
+        article = scrape_article(url, language)
+        if article:
+            results.append(article)
+    return results
 
 
 def enrich_articles(articles: list[dict]) -> list[dict]:
     """
-    For each article that has no full_text yet, attempt to scrape it.
-    Modifies articles in-place and returns the list.
-
-    Only scrapes articles missing full_text to avoid redundant work.
+    Enrich articles by scraping full text for those missing it.
+    
+    Takes a list of article dicts (typically from RSS/API collectors)
+    and attempts to scrape full text content for articles that don't
+    already have it.  Returns the enriched articles.
+    
+    Articles that fail scraping are returned as-is (with whatever
+    summary/text they already had).
+    
+    Args:
+        articles: List of article dicts (must have 'url', 'language').
+    
+    Returns:
+        List of enriched article dicts with full_text populated where possible.
     """
-    to_scrape = [a for a in articles if not a.get("full_text")]
-    logger.info("Scraping full text for %d articles ...", len(to_scrape))
-
-    for article in to_scrape:
-        enrichment = scrape_article(article["url"], article.get("language", "en"))
-        if enrichment:
-            article["full_text"] = enrichment["full_text"]
-            if not article.get("published_at") and enrichment["published_at"]:
-                article["published_at"] = enrichment["published_at"]
-        time.sleep(SCRAPE_DELAY)   # polite crawling
-
-    return articles
-
+    logger.info("Starting article enrichment (%d articles)", len(articles))
+    enriched = []
+    scraped_count = 0
+    
+    for article in articles:
+        url = article.get("url")
+        language = article.get("language", "fr")
+        
+        # Skip if already has substantial full_text
+        existing_text = article.get("full_text", "")
+        if existing_text and len(existing_text) > 200:
+            enriched.append(article)
+            continue
+        
+        # Try to scrape
+        if url:
+            scraped = scrape_article(url, language)
+            if scraped and scraped.get("full_text"):
+                # Merge scraped data into article
+                article["full_text"] = scraped.get("full_text")
+                article["authors"] = scraped.get("authors", [])
+                if scraped.get("published_at"):
+                    article["published_at"] = scraped.get("published_at")
+                scraped_count += 1
+                logger.debug(f"Scraped full text for {url}")
+        
+        enriched.append(article)
+    
+    logger.info("Article enrichment complete: %d articles scraped", scraped_count)
+    return enriched
