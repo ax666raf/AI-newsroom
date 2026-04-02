@@ -1,6 +1,7 @@
 # RSS Collector module
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Set
 import time
 import logging
@@ -402,20 +403,28 @@ def fetch_all_rss(limit_per_source: int = 50) -> List[Dict[str, Any]]:
         Aggregated list of article dicts from all RSS sources.
     """
     logger.info("Fetching articles from all RSS sources")
-    all_articles = []
-    
-    # Arabic RSS sources
-    logger.info("Collecting Arabic RSS articles...")
-    arabic_articles = collect_arabic_rss(limit_per_source=limit_per_source)
-    all_articles.extend(arabic_articles)
-    logger.info("✓ Arabic RSS: %d articles", len(arabic_articles))
-    
-    # English RSS sources
-    logger.info("Collecting English RSS articles...")
-    english_articles = collect_english_rss(limit_per_source=limit_per_source)
-    all_articles.extend(english_articles)
-    logger.info("✓ English RSS: %d articles", len(english_articles))
-    
+    all_articles: List[Dict[str, Any]] = []
+
+    streams = [
+        ("arabic_rss", collect_arabic_rss),
+        ("english_rss", collect_english_rss),
+    ]
+
+    with ThreadPoolExecutor(max_workers=len(streams), thread_name_prefix="rss") as executor:
+        futures = {
+            executor.submit(fn, limit_per_source=limit_per_source): name
+            for name, fn in streams
+        }
+
+        for future in as_completed(futures):
+            stream_name = futures[future]
+            try:
+                items = future.result() or []
+                all_articles.extend(items)
+                logger.info("✓ %s: %d articles", stream_name, len(items))
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("RSS stream %s failed: %s", stream_name, exc)
+
     logger.info("RSS collection complete: %d articles from all sources", len(all_articles))
     return all_articles
 

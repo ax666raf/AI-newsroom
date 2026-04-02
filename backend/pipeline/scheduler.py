@@ -12,6 +12,7 @@ Schedule (configurable via settings):
 """
 
 import logging
+import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from pytz import timezone as tz
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 ALGERIA_TZ = tz("Africa/Algiers")
 
 _scheduler: BackgroundScheduler | None = None
+_scheduler_lock = threading.Lock()
 
 
 def start_scheduler() -> None:
@@ -33,49 +35,52 @@ def start_scheduler() -> None:
     """
     global _scheduler
 
-    if _scheduler and _scheduler.running:
-        logger.info("Scheduler already running, skipping start")
-        return
+    with _scheduler_lock:
+        if _scheduler and _scheduler.running:
+            logger.info("Scheduler already running, skipping start")
+            return
 
-    _scheduler = BackgroundScheduler(timezone=ALGERIA_TZ)
+        _scheduler = BackgroundScheduler(timezone=ALGERIA_TZ)
 
-    # Morning run — primary daily briefing
-    _scheduler.add_job(
-        run_pipeline,
-        CronTrigger(hour=6, minute=0, timezone=ALGERIA_TZ),
-        id="morning_run",
-        name="Morning collection (06:00 DZ)",
-        replace_existing=True,
-    )
+        # Morning run — primary daily briefing
+        _scheduler.add_job(
+            run_pipeline,
+            CronTrigger(hour=6, minute=0, timezone=ALGERIA_TZ),
+            id="morning_run",
+            name="Morning collection (06:00 DZ)",
+            replace_existing=True,
+        )
 
-    # Midday top-up — catches breaking news
-    _scheduler.add_job(
-        run_pipeline,
-        CronTrigger(hour=12, minute=0, timezone=ALGERIA_TZ),
-        id="midday_run",
-        name="Midday top-up (12:00 DZ)",
-        replace_existing=True,
-        kwargs={"top_up": True},
-    )
+        # Midday top-up — catches breaking news
+        _scheduler.add_job(
+            run_pipeline,
+            CronTrigger(hour=12, minute=0, timezone=ALGERIA_TZ),
+            id="midday_run",
+            name="Midday top-up (12:00 DZ)",
+            replace_existing=True,
+            kwargs={"top_up": True},
+        )
 
-    # Evening update
-    _scheduler.add_job(
-        run_pipeline,
-        CronTrigger(hour=18, minute=0, timezone=ALGERIA_TZ),
-        id="evening_run",
-        name="Evening update (18:00 DZ)",
-        replace_existing=True,
-        kwargs={"top_up": True},
-    )
+        # Evening update
+        _scheduler.add_job(
+            run_pipeline,
+            CronTrigger(hour=18, minute=0, timezone=ALGERIA_TZ),
+            id="evening_run",
+            name="Evening update (18:00 DZ)",
+            replace_existing=True,
+            kwargs={"top_up": True},
+        )
 
-    _scheduler.start()
-    logger.info("Pipeline scheduler started (Algeria timezone, 3 daily runs)")
+        _scheduler.start()
+        logger.info("Pipeline scheduler started (Algeria timezone, 3 daily runs)")
 
 
 def stop_scheduler() -> None:
     """Gracefully shut down the scheduler (called on app shutdown)."""
     global _scheduler
-    if _scheduler and _scheduler.running:
-        _scheduler.shutdown(wait=False)
-        logger.info("Pipeline scheduler stopped")
+    with _scheduler_lock:
+        if _scheduler and _scheduler.running:
+            _scheduler.shutdown(wait=False)
+            logger.info("Pipeline scheduler stopped")
+        _scheduler = None
 

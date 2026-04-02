@@ -12,6 +12,7 @@ the ai_processing module which reads from the DB.
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -20,13 +21,59 @@ from backend.database.db import get_db_session
 from backend.database.models import Article, CollectionLog
 from backend.ai_processing.embeddings import embed_new_articles
 from backend.collector.rss_collector import fetch_all_rss
-from backend.collector.api_collector import fetch_all_newsapi
+from backend.collector.api_collector import fetch_newsapi
 from backend.collector.scraper import enrich_articles
 from backend.deduplication.url_hash import filter_known_urls
 from backend.deduplication.fuzzy_match import deduplicate_by_title
 from backend.deduplication.semantic_match import group_article_ids
 
 logger = logging.getLogger(__name__)
+
+
+def _collect_parallel(top_up: bool = False) -> tuple[list[dict], list[str]]:
+    """
+    Collect from streams in parallel.
+
+    Full run streams (4):
+      1) RSS (Arabic + English internally)
+      2) NewsAPI Arabic
+      3) NewsAPI French
+      4) NewsAPI English
+    """
+    streams: list[tuple[str, Any, dict[str, Any]]] = [
+        ("rss", fetch_all_rss, {}),
+    ]
+
+    if not top_up:
+        streams.extend(
+            [
+                ("newsapi_ar", fetch_newsapi, {"language": "ar"}),
+                ("newsapi_fr", fetch_newsapi, {"language": "fr"}),
+                ("newsapi_en", fetch_newsapi, {"language": "en"}),
+            ]
+        )
+
+    collected: list[dict] = []
+    errors: list[str] = []
+
+    with ThreadPoolExecutor(max_workers=len(streams), thread_name_prefix="collect") as executor:
+        futures = {
+            executor.submit(fn, **kwargs): name for name, fn, kwargs in streams
+        }
+
+        for future in as_completed(futures):
+            stream_name = futures[future]
+            try:
+                items = future.result() or []
+                if not isinstance(items, list):
+                    raise TypeError(f"{stream_name} returned non-list result")
+                collected.extend(items)
+                logger.info("Collection stream %s complete: %d articles", stream_name, len(items))
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Collection stream %s failed: %s", stream_name, exc)
+                errors.append(f"{stream_name}={exc}")
+
+    return collected, errors
 
 
 def run_pipeline(top_up: bool = False) -> dict:
@@ -45,11 +92,12 @@ def run_pipeline(top_up: bool = False) -> dict:
     status = "success"
     notes = ""
 
-    # ──────────────────────────────────────────── Step 1: Collect
+    # ──────────────────────────────────────────── Step 1: Collect (parallel streams)
     try:
-        raw = fetch_all_rss()
-        if not top_up:
-            raw += fetch_all_newsapi()
+        raw, collect_errors = _collect_parallel(top_up=top_up)
+        if collect_errors:
+            status = "failed" if not raw else "partial"
+            notes = _append_note(notes, "collection_stream_errors=" + " | ".join(collect_errors))
     except Exception as exc:  # noqa: BLE001
         logger.error("Collection failed: %s", exc)
         status = "failed"

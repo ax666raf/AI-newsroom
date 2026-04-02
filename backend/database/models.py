@@ -4,6 +4,7 @@ models.py — Full database schema for the AI Newsroom.
 Tables:
   articles        — Every collected article (deduplicated)
   story_groups    — Clusters of articles about the same story
+    briefings       — Assembled daily newsroom briefings (by language)
   collection_logs — Audit trail for pipeline runs
 
 Key design decisions:
@@ -19,6 +20,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
     Column,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -26,6 +28,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
@@ -124,6 +127,37 @@ class StoryGroup(Base):
 
     def __repr__(self):
         return f"<StoryGroup id={self.id} count={self.coverage_count} title={self.primary_title[:40]!r}>"
+
+
+# ──────────────────────────────────────────────────── Briefings
+class Briefing(Base):
+    """Assembled daily briefing payload saved per language."""
+
+    __tablename__ = "briefings"
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    briefing_date = Column(Date, nullable=False, index=True)
+    language      = Column(String(10), nullable=False, index=True)
+    payload       = Column(JSONB, nullable=False)
+    total_stories = Column(Integer, default=0, nullable=False)
+    created_at    = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at    = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("briefing_date", "language", name="uq_briefings_date_language"),
+    )
+
+    def __repr__(self):
+        return f"<Briefing id={self.id} date={self.briefing_date} lang={self.language}>"
 
 
 # ──────────────────────────────────────────────────── Collection Logs

@@ -2,7 +2,7 @@ import logging
 import time
 import re
 from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 import requests
 
 try:
@@ -172,17 +172,25 @@ def _parse_date(date_str):
 
 
 def _start_run(url, actor_id, run_input):
+    actor_path = quote(actor_id, safe="")
     try:
         resp = requests.post(
-            f"{BASE_URL}/acts/{actor_id}/runs",
+            f"{BASE_URL}/acts/{actor_path}/runs",
             json=run_input,
             params={"token": APIFY_TOKEN},
             timeout=30,
         )
         resp.raise_for_status()
         return resp.json()
-    except Exception as e:
-        logger.error(f"failed to start apify run for {url}: {e}")
+    except requests.RequestException as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        logger.error(
+            "failed to start apify run for domain=%s actor=%s status=%s error=%s",
+            _extract_domain(url),
+            actor_id,
+            status,
+            type(exc).__name__,
+        )
         return None
 
 
@@ -201,8 +209,8 @@ def _wait_for_completion(run_id):
             if status in ("FAILED", "ABORTED", "TIMED-OUT"):
                 logger.warning(f"apify run {run_id} ended with status {status}")
                 return False
-        except Exception as e:
-            logger.debug(f"poll error: {e}")
+        except requests.RequestException as exc:
+            logger.debug("poll error for run %s: %s", run_id, type(exc).__name__)
 
         time.sleep(POLL_INTERVAL)
         elapsed += POLL_INTERVAL
@@ -220,8 +228,14 @@ def _get_results(run_id):
         )
         resp.raise_for_status()
         return resp.json()
-    except Exception as e:
-        logger.error(f"failed to get apify results for run {run_id}: {e}")
+    except requests.RequestException as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        logger.error(
+            "failed to get apify results for run=%s status=%s error=%s",
+            run_id,
+            status,
+            type(exc).__name__,
+        )
         return None
 
 
