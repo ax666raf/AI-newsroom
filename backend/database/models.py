@@ -62,7 +62,7 @@ class Article(Base):
     )
 
     # ── Vector embedding for semantic search / RAG  (384-dim for MiniLM)
-    embedding = Column(Vector(384), nullable=True)
+    embedding = Column(Vector(384), nullable=False)
 
     # ── Dedup / grouping
     is_duplicate = Column(Boolean, default=False, nullable=False)

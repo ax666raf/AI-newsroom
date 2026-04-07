@@ -19,7 +19,7 @@ from typing import Any
 
 from backend.database.db import get_db_session
 from backend.database.models import Article, CollectionLog
-from backend.ai_processing.embeddings import embed_new_articles
+from backend.ai_processing.vector_store import generate_embedding
 from backend.collector.rss_collector import fetch_all_rss
 from backend.collector.api_collector import fetch_newsapi
 from backend.collector.scraper import enrich_articles
@@ -127,21 +127,21 @@ def run_pipeline(top_up: bool = False) -> dict:
         new_articles = enrich_articles(new_articles)
 
     # ──────────────────────────────────────────── Step 5: Persist to DB
-    saved_ids = _save_articles(new_articles)
+    saved_ids: list[int] = []
+    try:
+        saved_ids = _save_articles(new_articles)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Atomic article save failed: %s", exc)
+        status = "partial"
+        notes = _append_note(notes, f"embedding_preinsert_failed={exc}")
+
     saved = len(saved_ids)
     logger.info("Saved %d new articles to DB", saved)
 
-    embeddings_generated = 0
+    embeddings_generated = saved
     groups_created = 0
 
     if saved_ids:
-        try:
-            embeddings_generated = embed_new_articles(saved_ids)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Embedding generation failed: %s", exc)
-            status = "partial"
-            notes = _append_note(notes, f"embedding_failed={exc}")
-
         try:
             group_summary = group_article_ids(saved_ids)
             groups_created = int(group_summary.get("groups_created", 0))
@@ -162,34 +162,60 @@ def run_pipeline(top_up: bool = False) -> dict:
     }
 
 
+def _build_embedding_text(payload: dict[str, Any]) -> str:
+    parts = [payload.get("title") or ""]
+    summary = payload.get("summary")
+    full_text = payload.get("full_text")
+
+    if summary:
+        parts.append(str(summary)[:500])
+    elif full_text:
+        parts.append(str(full_text)[:500])
+
+    return " - ".join(str(p).strip() for p in parts if p and str(p).strip())
+
+
 def _save_articles(articles: list[dict]) -> list[int]:
-    """Bulk-insert articles into DB. Returns inserted article IDs."""
+    """Atomically insert articles with precomputed embeddings. Raises on first failure."""
     saved_ids: list[int] = []
 
     with get_db_session() as session:
-        for data in articles:
-            normalised = _normalise_article_payload(data)
-            if not normalised:
-                continue
+        try:
+            for data in articles:
+                normalised = _normalise_article_payload(data)
+                if not normalised:
+                    continue
 
-            article = Article(
-                title=normalised["title"],
-                url=normalised["url"],
-                url_hash=normalised["url_hash"],
-                full_text=normalised.get("full_text"),
-                summary=normalised.get("summary"),
-                source_name=normalised["source_name"],
-                language=normalised["language"],
-                region=normalised.get("region", "algeria"),
-                category=normalised.get("category", "general"),
-                published_at=normalised.get("published_at"),
-            )
-            session.add(article)
-            session.flush()  # article.id becomes available immediately
-            saved_ids.append(article.id)
+                embed_text = _build_embedding_text(normalised)
+                if not embed_text:
+                    raise ValueError(
+                        f"missing embedding input for url={normalised.get('url')}"
+                    )
 
-        session.commit()
-    return saved_ids
+                embedding = generate_embedding(embed_text)
+
+                article = Article(
+                    title=normalised["title"],
+                    url=normalised["url"],
+                    url_hash=normalised["url_hash"],
+                    full_text=normalised.get("full_text"),
+                    summary=normalised.get("summary"),
+                    embedding=embedding,
+                    source_name=normalised["source_name"],
+                    language=normalised["language"],
+                    region=normalised.get("region", "algeria"),
+                    category=normalised.get("category", "general"),
+                    published_at=normalised.get("published_at"),
+                )
+                session.add(article)
+                session.flush()  # article.id becomes available immediately
+                saved_ids.append(article.id)
+
+            session.commit()
+            return saved_ids
+        except Exception:
+            session.rollback()
+            raise
 
 
 def _pick_first(data: dict[str, Any], keys: list[str]) -> Any:
