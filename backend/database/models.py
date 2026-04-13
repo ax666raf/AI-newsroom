@@ -98,9 +98,17 @@ class StoryGroup(Base):
 
     id             = Column(Integer, primary_key=True, autoincrement=True)
     primary_title  = Column(String(500), nullable=False)
-    neutral_title  = Column(String(500), nullable=True)     # AI-rewritten headline
-    summary        = Column(Text, nullable=True)            # AI-generated summary
-    why_it_matters = Column(Text, nullable=True)            # AI explanation
+    neutral_title_ar = Column(String(500), nullable=True)
+    neutral_title_fr = Column(String(500), nullable=True)
+    neutral_title_en = Column(String(500), nullable=True)
+
+    summary_ar = Column(Text, nullable=True)
+    summary_fr = Column(Text, nullable=True)
+    summary_en = Column(Text, nullable=True)
+
+    why_it_matters_ar = Column(Text, nullable=True)
+    why_it_matters_fr = Column(Text, nullable=True)
+    why_it_matters_en = Column(Text, nullable=True)
     category       = Column(String(100), default="general")
     coverage_count = Column(Integer, default=1, nullable=False)
     source_names   = Column(ARRAY(String), default=[])      # list of source names
