@@ -110,6 +110,7 @@ class StoryGroup(Base):
     why_it_matters_fr = Column(Text, nullable=True)
     why_it_matters_en = Column(Text, nullable=True)
     category       = Column(String(100), default="general")
+    sentiment = Column(String(50), default="neutral")
     coverage_count = Column(Integer, default=1, nullable=False)
     source_names   = Column(ARRAY(String), default=[])      # list of source names
     languages      = Column(ARRAY(String), default=[])      # languages covering this story

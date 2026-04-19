@@ -1,211 +1,204 @@
-"""rag_pipeline.py - Orchestrates multilingual RAG briefing generation."""
+# ai_processing/rag_pipeline.py
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from backend.ai_processing.gemini_client import GeminiClient
-from backend.ai_processing.parser import parse_gemini_response
+from backend.ai_processing.parser import safe_process
 from backend.ai_processing.prompts import build_story_group_prompt
 from backend.ai_processing.retriever import get_relevant_historical_articles
+
 from backend.database.db import get_db_session
-from backend.database.models import Article, StoryGroup
+from backend.database.models import StoryGroup, Article, CollectionLog
 
 logger = logging.getLogger(__name__)
 
 OUTPUT_LANGUAGES = ("ar", "fr", "en")
-MAX_GROUPS_PER_RUN = 15
+MAX_GROUPS = 15
 TODAYS_ARTICLES_LIMIT = 20
 HISTORICAL_CONTEXT_LIMIT = 5
 
 
-def _now_utc() -> datetime:
+def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _ranked_story_group_ids(session, limit: int) -> list[int]:
-    """
-    Rank groups by coverage and freshness, then return top IDs.
-
-    Ranking proxy:
-      1) Highest coverage_count
-      2) Most recently updated
-    """
-    effective_limit = max(0, min(limit, MAX_GROUPS_PER_RUN))
-    if effective_limit == 0:
-        return []
-
+def _get_top_story_groups(session, limit: int) -> list[StoryGroup]:
     stmt = (
-        select(StoryGroup.id)
+        select(StoryGroup)
         .order_by(StoryGroup.coverage_count.desc(), StoryGroup.updated_at.desc())
-        .limit(effective_limit)
+        .limit(limit)
     )
-    return [int(row[0]) for row in session.execute(stmt)]
+    return list(session.scalars(stmt))
 
 
-def _load_todays_group_articles(
-    session,
-    group_id: int,
-    now: datetime,
-    lookback_hours: int = 36,
-) -> list[dict[str, Any]]:
-    window_start = now - timedelta(hours=lookback_hours)
-
+def _get_todays_articles(session, group_id: int) -> list[dict[str, Any]]:
     stmt = (
-        select(
-            Article.id,
-            Article.title,
-            Article.full_text,
-            Article.summary,
-            Article.source_name,
-            Article.language,
-            Article.published_at,
-            Article.collected_at,
-            Article.url,
-        )
+        select(Article)
         .where(Article.group_id == group_id)
-        .where(Article.collected_at >= window_start)
         .order_by(Article.collected_at.desc())
         .limit(TODAYS_ARTICLES_LIMIT)
     )
 
-    rows = session.execute(stmt).all()
+    articles = session.scalars(stmt).all()
+
     return [
         {
-            "id": row.id,
-            "title": row.title,
-            "full_text": row.full_text,
-            "summary": row.summary,
-            "source_name": row.source_name,
-            "language": row.language,
-            "published_at": row.published_at,
-            "collected_at": row.collected_at,
-            "url": row.url,
+            "title": a.title,
+            "summary": a.summary,
+            "source": a.source_name,
+            "language": a.language,
+            "full_text": a.full_text,
+            "published_at": a.published_at,
         }
-        for row in rows
+        for a in articles
     ]
 
 
-def _persist_language_results_on_articles(
-    session,
-    group_id: int,
-    language_results: dict[str, dict[str, Any]],
-) -> None:
-    """Store generated per-language summary/category on grouped articles."""
-    for language, result in language_results.items():
-        stmt = (
-            update(Article)
-            .where(Article.group_id == group_id)
-            .where(Article.language == language)
-            .values(
-                summary=str(result.get("summary") or ""),
-                category=str(result.get("category") or "general"),
-            )
-        )
-        session.execute(stmt)
-
-
-def _pick_canonical_result(language_results: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    if "en" in language_results:
-        return language_results["en"]
-    if language_results:
-        first_key = next(iter(language_results))
-        return language_results[first_key]
-    return parse_gemini_response(None)
-
-
-def run_rag_pipeline(max_groups: int = MAX_GROUPS_PER_RUN) -> dict[str, Any]:
+def process_single_group(session, group: StoryGroup, gemini: GeminiClient) -> bool:
     """
-    Run multilingual RAG generation for top-ranked story groups.
+    Process one story group for all three output languages.
 
-    Flow per group:
-      retrieve context -> build prompt -> Gemini call -> parse response -> store -> commit
+    Returns True if all language outputs were generated and stored successfully.
+    Returns False if any step fails.
+    """
+    try:
+        todays_articles = _get_todays_articles(session, group.id)
+        if not todays_articles:
+            logger.warning("No articles found for group=%s", group.id)
+            return False
 
-    Commits after each group (not at end) so partial progress is preserved.
+        historical_context = get_relevant_historical_articles(
+            group.id,
+            limit=HISTORICAL_CONTEXT_LIMIT,
+        )
+
+        results: dict[str, dict[str, Any]] = {}
+
+        for lang in OUTPUT_LANGUAGES:
+            try:
+                prompt = build_story_group_prompt(
+                    output_language=lang,
+                    todays_articles=todays_articles,
+                    historical_background=historical_context,
+                )
+
+                raw_response = gemini.generate(prompt)
+                parsed = safe_process(
+                    raw_response,
+                    fallback_headline=group.primary_title,
+                )
+
+                results[lang] = parsed
+
+                logger.info("AI success: group=%s lang=%s", group.id, lang)
+
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "AI language failure: group=%s lang=%s error=%s",
+                    group.id,
+                    lang,
+                    exc,
+                )
+                return False
+
+        # Store multilingual StoryGroup fields
+        group.neutral_title_ar = results["ar"]["neutral_headline"]
+        group.summary_ar = results["ar"]["summary"]
+        group.why_it_matters_ar = results["ar"]["why_it_matters"]
+
+        group.neutral_title_fr = results["fr"]["neutral_headline"]
+        group.summary_fr = results["fr"]["summary"]
+        group.why_it_matters_fr = results["fr"]["why_it_matters"]
+
+        group.neutral_title_en = results["en"]["neutral_headline"]
+        group.summary_en = results["en"]["summary"]
+        group.why_it_matters_en = results["en"]["why_it_matters"]
+
+        # Shared fields: use English as canonical
+        group.category = results["en"].get("category", "general")
+        group.sentiment = results["en"].get("sentiment", "neutral")
+
+        return True
+
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Group failure: group=%s error=%s", group.id, exc)
+        return False
+
+
+def run_full_ai_processing(limit: int = MAX_GROUPS) -> dict[str, Any]:
+    """
+    Run AI processing for the top-ranked story groups.
+
+    Commits after each group so completed work is preserved.
     """
     stats = {
         "groups_selected": 0,
-        "groups_processed": 0,
+        "groups_success": 0,
         "groups_failed": 0,
-        "language_successes": 0,
-        "language_failures": 0,
     }
 
     gemini = GeminiClient()
-    now = _now_utc()
+    start_time = _now()
 
     with get_db_session() as session:
-        group_ids = _ranked_story_group_ids(session, max_groups)
-        stats["groups_selected"] = len(group_ids)
+        groups = _get_top_story_groups(session, limit)
+        stats["groups_selected"] = len(groups)
 
-    if not group_ids:
-        logger.info("RAG pipeline: no story groups selected")
-        return stats
+        if not groups:
+            logger.info("No story groups available for AI processing")
+            return stats
 
-    for group_id in group_ids:
-        try:
-            with get_db_session() as session:
-                group = session.get(StoryGroup, group_id)
-                if group is None:
+        for group in groups:
+            try:
+                success = process_single_group(session, group, gemini)
+
+                if success:
+                    stats["groups_success"] += 1
+                else:
                     stats["groups_failed"] += 1
-                    logger.warning("RAG pipeline: StoryGroup %d not found", group_id)
-                    continue
 
-                todays_articles = _load_todays_group_articles(session, group_id, now)
-                historical_context = get_relevant_historical_articles(
-                    group_id,
-                    limit=HISTORICAL_CONTEXT_LIMIT,
+                session.commit()
+                logger.info("Committed StoryGroup id=%s", group.id)
+
+            except Exception as exc:  # noqa: BLE001
+                stats["groups_failed"] += 1
+                session.rollback()
+                logger.exception(
+                    "Fatal pipeline error on group=%s error=%s",
+                    group.id,
+                    exc,
                 )
 
-                language_results: dict[str, dict[str, Any]] = {}
+        status = "success"
+        if stats["groups_failed"] and stats["groups_success"]:
+            status = "partial"
+        elif stats["groups_failed"] and not stats["groups_success"]:
+            status = "failed"
 
-                for output_language in OUTPUT_LANGUAGES:
-                    try:
-                        prompt = build_story_group_prompt(
-                            output_language=output_language,
-                            todays_articles=todays_articles,
-                            historical_background=historical_context,
-                        )
-                        raw = gemini.generate(prompt)
-                        parsed = parse_gemini_response(raw)
-                        language_results[output_language] = parsed
-                        stats["language_successes"] += 1
-                        logger.info(
-                            "RAG pipeline success: group=%d language=%s",
-                            group_id,
-                            output_language,
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        stats["language_failures"] += 1
-                        language_results[output_language] = parse_gemini_response(None)
-                        logger.exception(
-                            "RAG pipeline failure: group=%d language=%s error=%s",
-                            group_id,
-                            output_language,
-                            exc,
-                        )
+        duration_seconds = int((_now() - start_time).total_seconds())
+        notes = (
+            f"AI processing run completed. "
+            f"Selected={stats['groups_selected']}, "
+            f"Success={stats['groups_success']}, "
+            f"Failed={stats['groups_failed']}, "
+            f"Duration={duration_seconds}s."
+        )
 
-                _persist_language_results_on_articles(session, group_id, language_results)
+        log = CollectionLog(
+            groups_created=stats["groups_success"],
+            new_stories=stats["groups_selected"],
+            status=status,
+            notes=notes,
+        )
 
-                canonical = _pick_canonical_result(language_results)
-                group.neutral_title = str(canonical.get("neutral_headline") or group.primary_title)
-                group.summary = str(canonical.get("summary") or "")
-                group.why_it_matters = str(canonical.get("why_it_matters") or "")
-                group.category = str(canonical.get("category") or "World")
+        session.add(log)
+        session.commit()
 
-                # Persist progress immediately per group.
-                session.commit()
-
-                stats["groups_processed"] += 1
-                logger.info("RAG pipeline committed group %d", group_id)
-
-        except Exception as exc:  # noqa: BLE001
-            stats["groups_failed"] += 1
-            logger.exception("RAG pipeline group-level failure: group=%d error=%s", group_id, exc)
-
-    logger.info("RAG pipeline finished: %s", stats)
+    logger.info("AI processing pipeline finished: %s", stats)
     return stats
