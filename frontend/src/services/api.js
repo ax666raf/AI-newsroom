@@ -40,4 +40,4 @@ dist/
 
 # OS
 .DS_Store
-Thumbs.db
+Thumbs.db*/
