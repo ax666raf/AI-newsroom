@@ -46,10 +46,10 @@ def generate_story_group_embedding(story_group: StoryGroup) -> list[float] | Non
     Returns a Python list so it can be written directly to pgvector columns.
     """
     parts = [
-        story_group.neutral_title or "",
+        story_group.neutral_title_en or story_group.neutral_title_fr or story_group.neutral_title_ar or "",
         story_group.primary_title or "",
-        (story_group.summary or "")[:1000],
-        (story_group.why_it_matters or "")[:500],
+        (story_group.summary_en or story_group.summary_fr or story_group.summary_ar or "")[:1000],
+        (story_group.why_it_matters_en or story_group.why_it_matters_fr or story_group.why_it_matters_ar or "")[:500],
     ]
 
     combined = " — ".join(p.strip() for p in parts if p and p.strip())

@@ -94,8 +94,8 @@ def _query_today_ai_processed_groups(session, start: datetime, end: datetime) ->
         select(StoryGroup)
         .where(StoryGroup.updated_at >= start)
         .where(StoryGroup.updated_at < end)
-        .where(and_(StoryGroup.summary.isnot(None), StoryGroup.neutral_title.isnot(None)))
-        .order_by(StoryGroup.coverage_count.desc(), StoryGroup.updated_at.desc())
+        .where(StoryGroup.ai_processed == True)
+        .order_by(StoryGroup.importance_score.desc(), StoryGroup.updated_at.desc())
     )
     return list(session.scalars(stmt))
 
@@ -115,9 +115,14 @@ def build_today_briefing_payload(language: str = "en") -> dict[str, Any]:
             bucket = _bucket_category(group.category)
 
             localized = _latest_language_article(session, group.id, language)
-            headline = group.neutral_title or group.primary_title
-            summary = group.summary or ""
-            if localized is not None:
+            
+            # Use language-specific AI outputs based on requested language
+            headline = getattr(group, f"neutral_title_{language}", None) or getattr(group, "neutral_title_en", None) or group.primary_title
+            summary = getattr(group, f"summary_{language}", None) or getattr(group, "summary_en", None) or ""
+            why_matters = getattr(group, f"why_it_matters_{language}", None) or getattr(group, "why_it_matters_en", None) or ""
+
+            # Fallback to article text if AI didn't successfully produce a language-specific output
+            if localized is not None and not getattr(group, f"neutral_title_{language}", None):
                 headline = localized.get("title") or headline
                 summary = localized.get("summary") or summary
 
@@ -125,7 +130,7 @@ def build_today_briefing_payload(language: str = "en") -> dict[str, Any]:
                 "story_group_id": group.id,
                 "headline": headline,
                 "summary": summary,
-                "why_it_matters": group.why_it_matters or "",
+                "why_it_matters": why_matters,
                 "category": bucket,
                 "importance_score": score,
                 "coverage_count": group.coverage_count or 0,

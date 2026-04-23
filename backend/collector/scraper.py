@@ -115,6 +115,13 @@ def scrape_multiple(urls, language="fr"):
 
 def enrich_articles(articles: list[dict]) -> list[dict]:
     """
+Database Schema: Three Core Tables
+Articles
+Every collected article with title, URL, text, source, language, region, timestamps, embedding vector, and group_id foreign key.
+Story Groups
+Unique story clusters with primary title, coverage count, sources array, representative embedding, importance score, and AI-generated outputs in nine languages.
+Collection Logs
+Audit trail recording every pipeline run with articles found, duplicates removed, new stories created, and status notes.
     Enrich articles by scraping full text for those missing it.
     
     Takes a list of article dicts (typically from RSS/API collectors)

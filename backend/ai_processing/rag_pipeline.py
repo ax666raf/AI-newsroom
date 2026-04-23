@@ -8,7 +8,7 @@ from typing import Any
 
 from sqlalchemy import select, update
 
-from backend.ai_processing.gemini_client import GeminiClient
+from backend.ai_processing.llm_client import LocalLLMClient
 from backend.ai_processing.parser import parse_gemini_response
 from backend.ai_processing.prompts import build_story_group_prompt
 from backend.ai_processing.retriever import get_relevant_historical_articles
@@ -135,7 +135,7 @@ def run_rag_pipeline(max_groups: int = MAX_GROUPS_PER_RUN) -> dict[str, Any]:
         "language_failures": 0,
     }
 
-    gemini = GeminiClient()
+    llm = LocalLLMClient()
     now = _now_utc()
 
     with get_db_session() as session:
@@ -170,7 +170,7 @@ def run_rag_pipeline(max_groups: int = MAX_GROUPS_PER_RUN) -> dict[str, Any]:
                             todays_articles=todays_articles,
                             historical_background=historical_context,
                         )
-                        raw = gemini.generate(prompt)
+                        raw = llm.generate(prompt)
                         parsed = parse_gemini_response(raw)
                         language_results[output_language] = parsed
                         stats["language_successes"] += 1
@@ -192,10 +192,36 @@ def run_rag_pipeline(max_groups: int = MAX_GROUPS_PER_RUN) -> dict[str, Any]:
                 _persist_language_results_on_articles(session, group_id, language_results)
 
                 canonical = _pick_canonical_result(language_results)
-                group.neutral_title = str(canonical.get("neutral_headline") or group.primary_title)
-                group.summary = str(canonical.get("summary") or "")
-                group.why_it_matters = str(canonical.get("why_it_matters") or "")
+                
+                # 1. Update English
+                if "en" in language_results:
+                    group.neutral_title_en = str(language_results["en"].get("neutral_headline") or "") or None
+                    group.summary_en = str(language_results["en"].get("summary") or "") or None
+                    group.why_it_matters_en = str(language_results["en"].get("why_it_matters") or "") or None
+                
+                # 2. Update French
+                if "fr" in language_results:
+                    group.neutral_title_fr = str(language_results["fr"].get("neutral_headline") or "") or None
+                    group.summary_fr = str(language_results["fr"].get("summary") or "") or None
+                    group.why_it_matters_fr = str(language_results["fr"].get("why_it_matters") or "") or None
+
+                # 3. Update Arabic
+                if "ar" in language_results:
+                    group.neutral_title_ar = str(language_results["ar"].get("neutral_headline") or "") or None
+                    group.summary_ar = str(language_results["ar"].get("summary") or "") or None
+                    group.why_it_matters_ar = str(language_results["ar"].get("why_it_matters") or "") or None
+                
+                # 4. Global Metadata
                 group.category = str(canonical.get("category") or "World")
+                group.sentiment = str(canonical.get("sentiment") or "neutral")
+                group.context_used = str(canonical.get("context_used", False))
+                group.ai_processed = True
+                
+                # Simple static importance score calculation based on coverage
+                # The dynamic time-decay happens at delivery time (in assembler)
+                coverage = float(group.coverage_count or 1)
+                source_count = float(len(set(group.source_names or [])))
+                group.importance_score = (coverage * 2.0) + (source_count * 1.5)
 
                 # Persist progress immediately per group.
                 session.commit()

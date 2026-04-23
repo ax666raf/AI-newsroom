@@ -92,15 +92,34 @@ class StoryGroup(Base):
     A cluster of articles that all report the same underlying story.
 
     Created by the dedup/grouping pipeline.  AI processing later fills:
-      neutral_title, summary, why_it_matters
+      neutral_title, summary, why_it_matters across 3 languages.
     """
     __tablename__ = "story_groups"
 
     id             = Column(Integer, primary_key=True, autoincrement=True)
     primary_title  = Column(String(500), nullable=False)
-    neutral_title  = Column(String(500), nullable=True)     # AI-rewritten headline
-    summary        = Column(Text, nullable=True)            # AI-generated summary
-    why_it_matters = Column(Text, nullable=True)            # AI explanation
+    
+    # ── AI Outputs (English)
+    neutral_title_en  = Column(String(500), nullable=True)
+    summary_en        = Column(Text, nullable=True)
+    why_it_matters_en = Column(Text, nullable=True)
+
+    # ── AI Outputs (French)
+    neutral_title_fr  = Column(String(500), nullable=True)
+    summary_fr        = Column(Text, nullable=True)
+    why_it_matters_fr = Column(Text, nullable=True)
+
+    # ── AI Outputs (Arabic)
+    neutral_title_ar  = Column(String(500), nullable=True)
+    summary_ar        = Column(Text, nullable=True)
+    why_it_matters_ar = Column(Text, nullable=True)
+
+    # ── AI Metadata
+    importance_score  = Column(Float, default=0.0)
+    sentiment         = Column(String(50), nullable=True)
+    context_used      = Column(Text, nullable=True)
+    ai_processed      = Column(Boolean, default=False, nullable=False)
+
     category       = Column(String(100), default="general")
     coverage_count = Column(Integer, default=1, nullable=False)
     source_names   = Column(ARRAY(String), default=[])      # list of source names

@@ -28,13 +28,13 @@ def build_story_group_prompt(
     lines: list[str] = []
 
     # First line must explicitly state output language.
-    lines.append(f"Output language: {output_language}")
+    lines.append(f"Output language: {output_language}") #tells mistral what language the output should be
     lines.append("")
     lines.append("You are an AI news editor. Use the data below to produce one balanced newsroom item.")
     lines.append("")
 
     lines.append("Today's articles:")
-    if todays_articles:
+    if todays_articles: #add the articles
         for idx, article in enumerate(todays_articles, start=1):
             source = article.get("source_name") or article.get("source") or "unknown"
             language = article.get("language") or "unknown"
@@ -49,7 +49,7 @@ def build_story_group_prompt(
     lines.append("")
 
     lines.append("Historical background:")
-    if historical_background:
+    if historical_background: #old articles for background
         for idx, article in enumerate(historical_background, start=1):
             date_str = _format_date(article.get("published_at") or article.get("date"))
             source = article.get("source_name") or article.get("source") or "unknown"
