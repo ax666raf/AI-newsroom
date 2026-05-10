@@ -1,4 +1,7 @@
 import { useState, useRef, useEffect } from "react";
+import { askNewsroomQuestion } from "../services/api";
+import editIcon from "../edit.png";
+import msgIcon from "../msg.png";
 
 // Inject Google Fonts
 const fontLink = document.createElement("link");
@@ -16,24 +19,27 @@ document.head.appendChild(globalStyle);
 const SUGGESTED_TOPICS = [
   {
     id: 1,
-    icon: "📰",
-    title: "Latest Breaking News",
-    description: "Get a summary of today's top breaking stories",
-    prompt: "What are today's top breaking news stories?",
-  },
-  {
-    id: 2,
-    icon: "🌍",
-    title: "Global Affairs",
-    description: "Explore international events and geopolitics",
-    prompt: "Give me an overview of the latest global affairs and international events.",
-  },
-  {
-    id: 3,
-    icon: "💹",
-    title: "Markets & Economy",
-    description: "Stay updated on financial and economic news",
-    prompt: "What are the latest updates on markets and the economy?",
+      icon: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg>
+      ),
+      title: "Latest Breaking News",
+      description: "Get a summary of today's top breaking stories",
+      prompt: "What are today's top breaking news stories?",
+    },
+    {
+      id: 2,
+      icon: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+      ),
+      title: "Global Affairs",
+      description: "Explore international events and geopolitics",
+      prompt: "Give me an overview of the latest global affairs and international events.",
+    },
+    {
+      id: 3,
+      icon: (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+      ),
   },
 ];
 
@@ -42,8 +48,6 @@ const HISTORY = [
   { section: "Last Week", items: ["Platform Marketplace 101", "Give me a proposal for company…"] },
   { section: "Last Month", items: ["Platform Marketplace 101", "Give me a proposal for company…"] },
 ];
-
-const QUICK_ACTIONS = ["Make Response Shorter", "Explain it to me like a lawyer", "Tell me about more"];
 
 function TypingDots() {
   return (
@@ -91,9 +95,9 @@ function Message({ msg }) {
 function WelcomeScreen({ onSelectTopic }) {
   return (
     <div className="flex flex-col items-center justify-center h-full px-8 pb-16">
-      <div className="mb-3 w-14 h-14 rounded-2xl flex items-center justify-center text-2xl"
-        style={{ backgroundColor: "#4a5240" }}>
-        📡
+      <div className="mb-3 w-14 h-14 rounded-2xl flex items-center justify-center"
+        style={{ backgroundColor: "#4a5240", color: "#f5f0e8" }}>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
       </div>
       <h1 className="text-2xl font-bold mb-1 serif" style={{ color: "#2d2a22" }}>
         Automated Newsroom
@@ -181,20 +185,13 @@ export default function NewsroomChatbot() {
         content: m.content,
       }));
 
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system:
-            "You are an automated newsroom AI assistant. You provide accurate, well-structured, journalistic responses about news, current events, politics, economy, science, and global affairs. Write in a professional yet accessible editorial tone. Use numbered lists for multiple points. Be concise and informative.",
-          messages: [...history, { role: "user", content: text }],
-        }),
+      const data = await askNewsroomQuestion({
+        question: text,
+        history,
+        language: "en"
       });
 
-      const data = await response.json();
-      const raw = data.content?.[0]?.text || "I couldn't retrieve that information right now.";
+      const raw = data.answer || "I couldn't retrieve that information right now.";
       const formatted = formatResponse(raw);
 
       setChats((prev) =>
@@ -228,10 +225,6 @@ export default function NewsroomChatbot() {
     setLoading(false);
   };
 
-  const handleQuickAction = (action) => {
-    sendMessage(action);
-  };
-
   const newChat = () => {
     const id = Date.now();
     setChats((prev) => [...prev, { id, title: "New Chat", messages: [] }]);
@@ -251,7 +244,8 @@ export default function NewsroomChatbot() {
             onMouseEnter={e => e.currentTarget.style.backgroundColor = "#5a6350"}
             onMouseLeave={e => e.currentTarget.style.backgroundColor = "#4a5240"}
           >
-            <span className="text-lg leading-none">+</span> New Chat
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+            New Chat
           </button>
 
           {/* Active chats */}
@@ -268,7 +262,7 @@ export default function NewsroomChatbot() {
                   onMouseEnter={e => { if (activeChatId !== c.id) e.currentTarget.style.backgroundColor = "#3a3628"; }}
                   onMouseLeave={e => { if (activeChatId !== c.id) e.currentTarget.style.backgroundColor = "transparent"; }}
                 >
-                  💬 {c.title}
+                  <img src={msgIcon} alt="msg" className="w-4 h-4 inline-block mr-1 opacity-70" /> {c.title}
                 </button>
               ))}
             </div>
@@ -287,21 +281,13 @@ export default function NewsroomChatbot() {
                   onMouseEnter={e => e.currentTarget.style.backgroundColor = "#3a3628"}
                   onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
                 >
-                  <span style={{ color: "#6b6250" }}>💬</span> {item}
+                  <img src={msgIcon} alt="msg" className="w-4 h-4 inline-block flex-shrink-0 opacity-70" /> 
+                  <span className="truncate">{item}</span>
                 </button>
               ))}
             </div>
           ))}
 
-          <div className="mt-auto pt-4 border-t" style={{ borderColor: "#3a3628" }}>
-            <button className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs w-full transition-colors"
-              style={{ color: "#c8bfaa" }}
-              onMouseEnter={e => e.currentTarget.style.backgroundColor = "#3a3628"}
-              onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
-            >
-              ✦ Upgrade to Plus
-            </button>
-          </div>
         </aside>
       )}
 
@@ -317,7 +303,7 @@ export default function NewsroomChatbot() {
               onMouseEnter={e => e.currentTarget.style.backgroundColor = "#ede8dc"}
               onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
             >
-              ☰
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
             </button>
             {hasMessages && (
               <span className="text-sm font-semibold truncate max-w-xs" style={{ color: "#2d2a22" }}>
@@ -332,7 +318,8 @@ export default function NewsroomChatbot() {
                 onMouseEnter={e => e.currentTarget.style.backgroundColor = "#ede8dc"}
                 onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
               >
-                ✏️ Edit
+                <img src={editIcon} alt="edit" className="w-3.5 h-3.5 inline-block mr-1 opacity-70" />
+                Edit
               </button>
             )}
             <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
@@ -352,26 +339,6 @@ export default function NewsroomChatbot() {
                 <Message key={i} msg={msg} />
               ))}
               {/* Quick actions after last assistant message */}
-              {!loading && activeChat.messages[activeChat.messages.length - 1]?.role === "assistant" && (
-                <div className="mb-4">
-                  <div className="flex items-center gap-2 mb-4">
-                    <button className="text-sm" style={{ color: "#9b8e7a" }} title="Thumbs up">👍</button>
-                    <button className="text-sm" style={{ color: "#9b8e7a" }} title="Thumbs down">👎</button>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {QUICK_ACTIONS.map((a) => (
-                      <button key={a} onClick={() => handleQuickAction(a)}
-                        className="px-4 py-2 rounded-full text-xs font-medium transition-all border"
-                        style={{ backgroundColor: "#4a5240", color: "#f5f0e8", borderColor: "#4a5240" }}
-                        onMouseEnter={e => e.currentTarget.style.backgroundColor = "#5a6350"}
-                        onMouseLeave={e => e.currentTarget.style.backgroundColor = "#4a5240"}
-                      >
-                        {a}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
               <div ref={messagesEndRef} />
             </div>
           )}
@@ -379,18 +346,6 @@ export default function NewsroomChatbot() {
 
         {/* Input area */}
         <div className="px-4 pb-4 pt-2" style={{ backgroundColor: "#f5f0e8" }}>
-          {hasMessages && (
-            <div className="max-w-2xl mx-auto mb-2 flex justify-center">
-              <button onClick={() => sendMessage("Regenerate response")}
-                className="flex items-center gap-2 text-xs px-4 py-2 rounded-full border transition-colors"
-                style={{ borderColor: "#d5cfc2", color: "#7a7060", backgroundColor: "#f5f0e8" }}
-                onMouseEnter={e => e.currentTarget.style.backgroundColor = "#ede8dc"}
-                onMouseLeave={e => e.currentTarget.style.backgroundColor = "#f5f0e8"}
-              >
-                ↻ Regenerate response
-              </button>
-            </div>
-          )}
           <div className="max-w-2xl mx-auto flex items-center gap-2 rounded-2xl border px-4 py-3"
             style={{ backgroundColor: "#fff", borderColor: "#d5cfc2" }}>
             <input
@@ -410,23 +365,10 @@ export default function NewsroomChatbot() {
                 color: "#f5f0e8",
               }}
             >
-              ▶
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
             </button>
           </div>
         </div>
       </main>
-
-      {/* Right panel — Links sidebar (shown when chat is active) */}
-      {hasMessages && (
-        <aside className="w-48 flex-shrink-0 px-4 py-5 border-l hidden lg:flex flex-col gap-2"
-          style={{ backgroundColor: "#f5f0e8", borderColor: "#ddd8cc" }}>
-          <p className="text-xs font-semibold leading-snug mb-2" style={{ color: "#2d2a22" }}>
-            Links to <strong>Document</strong> and <strong>Website</strong> for this Response
-          </p>
-          <a href="#" className="text-xs underline" style={{ color: "#4a5240" }}>🔗 Link to website</a>
-          <a href="#" className="text-xs underline" style={{ color: "#4a5240" }}>📄 Link to document file</a>
-        </aside>
-      )}
     </div>
-  );
-}
+  );}

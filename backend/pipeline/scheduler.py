@@ -42,37 +42,17 @@ def start_scheduler() -> None:
 
         _scheduler = BackgroundScheduler(timezone=ALGERIA_TZ)
 
-        # Morning run — primary daily briefing
+        # Primary daily run requested at 5 AM
         _scheduler.add_job(
             run_pipeline,
-            CronTrigger(hour=6, minute=0, timezone=ALGERIA_TZ),
+            CronTrigger(hour=5, minute=0, timezone=ALGERIA_TZ),
             id="morning_run",
-            name="Morning collection (06:00 DZ)",
+            name="Morning collection (05:00 DZ)",
             replace_existing=True,
-        )
-
-        # Midday top-up — catches breaking news
-        _scheduler.add_job(
-            run_pipeline,
-            CronTrigger(hour=12, minute=0, timezone=ALGERIA_TZ),
-            id="midday_run",
-            name="Midday top-up (12:00 DZ)",
-            replace_existing=True,
-            kwargs={"top_up": True},
-        )
-
-        # Evening update
-        _scheduler.add_job(
-            run_pipeline,
-            CronTrigger(hour=18, minute=0, timezone=ALGERIA_TZ),
-            id="evening_run",
-            name="Evening update (18:00 DZ)",
-            replace_existing=True,
-            kwargs={"top_up": True},
         )
 
         _scheduler.start()
-        logger.info("Pipeline scheduler started (Algeria timezone, 3 daily runs)")
+        logger.info("Pipeline scheduler started (Algeria timezone, 1 daily run at 5 AM)")
 
 
 def stop_scheduler() -> None:

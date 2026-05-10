@@ -116,11 +116,70 @@ def _extract_json_object_with_regex(text: str) -> str | None:
 def _normalize_text(value: Any, fallback: str) -> str:
     if value is None:
         return fallback
+
+    if isinstance(value, str):
+        text = value.strip()
+        return text or fallback
+
+    if isinstance(value, (int, float, bool)):
+        text = str(value).strip()
+        return text or fallback
+
+    if isinstance(value, dict):
+        preferred_keys = (
+            "text",
+            "value",
+            "content",
+            "answer",
+            "summary",
+            "headline",
+            "neutral_headline",
+            "why_it_matters",
+            "reason",
+        )
+        collected: list[str] = []
+        for key in preferred_keys:
+            if key in value:
+                nested = _normalize_text(value.get(key), "")
+                if nested:
+                    collected.append(nested)
+        if not collected:
+            for nested_value in value.values():
+                nested = _normalize_text(nested_value, "")
+                if nested:
+                    collected.append(nested)
+        text = " ".join(collected).strip()
+        return text or fallback
+
+    if isinstance(value, (list, tuple, set)):
+        collected = [_normalize_text(item, "") for item in value]
+        text = " ".join(part for part in collected if part).strip()
+        return text or fallback
+
     text = str(value).strip()
     return text or fallback
 
 
 def _normalize_category(value: Any) -> str:
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            normalized = _normalize_category(item)
+            if normalized != "World":
+                return normalized
+        return "World"
+
+    if isinstance(value, dict):
+        for key in ("category", "value", "label", "name", "topic"):
+            if key in value:
+                normalized = _normalize_category(value.get(key))
+                if normalized != "World":
+                    return normalized
+        for nested_value in value.values():
+            normalized = _normalize_category(nested_value)
+            if normalized != "World":
+                return normalized
+        return "World"
+
     if not isinstance(value, str):
         return "World"
 
@@ -143,6 +202,25 @@ def _normalize_category(value: Any) -> str:
 
 
 def _normalize_sentiment(value: Any) -> str:
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            normalized = _normalize_sentiment(item)
+            if normalized != "neutral":
+                return normalized
+        return "neutral"
+
+    if isinstance(value, dict):
+        for key in ("sentiment", "value", "label", "overall", "short_term", "long_term"):
+            if key in value:
+                normalized = _normalize_sentiment(value.get(key))
+                if normalized != "neutral":
+                    return normalized
+        for nested_value in value.values():
+            normalized = _normalize_sentiment(nested_value)
+            if normalized != "neutral":
+                return normalized
+        return "neutral"
+
     if not isinstance(value, str):
         return "neutral"
 
@@ -158,6 +236,10 @@ def _normalize_context_used(value: Any) -> bool:
         return value
     if isinstance(value, (int, float)):
         return bool(value)
+    if isinstance(value, dict):
+        return any(_normalize_context_used(item) for item in value.values()) or bool(value)
+    if isinstance(value, (list, tuple, set)):
+        return any(_normalize_context_used(item) for item in value)
     if isinstance(value, str):
         lowered = value.strip().lower()
         if lowered in {"true", "yes", "1", "used", "y"}:

@@ -164,7 +164,7 @@ def find_similar_articles(
     query_text: str,
     limit: int = 10,
     language: Optional[str] = None,
-    similarity_threshold: float = 0.65,
+    similarity_threshold: float = 0.40,
     hours_back: Optional[int] = 168,
 ) -> list[dict]:
     """
@@ -180,7 +180,7 @@ def find_similar_articles(
         hours_back: Restrict search to recently collected articles.
 
     Returns:
-        List of dicts: {id, title, url, source_name, language, similarity}
+        List of dicts: {id, title, url, source_name, language, summary, full_text, published_at, group_id, similarity}
         ordered by highest similarity first.
     """
     query_embedding = generate_embedding(query_text)
@@ -197,6 +197,10 @@ def find_similar_articles(
                 Article.url,
                 Article.source_name,
                 Article.language,
+                Article.summary,
+                Article.full_text,
+                Article.published_at,
+                Article.group_id,
                 (1 - distance_expr).label("similarity"),
             )
             .where(Article.embedding.isnot(None))
@@ -225,6 +229,10 @@ def find_similar_articles(
                 "url": row.url,
                 "source_name": row.source_name,
                 "language": row.language,
+                "summary": row.summary,
+                "full_text": row.full_text,
+                "published_at": row.published_at.isoformat() if row.published_at else None,
+                "group_id": row.group_id,
                 "similarity": round(float(row.similarity), 4),
             }
             for row in rows

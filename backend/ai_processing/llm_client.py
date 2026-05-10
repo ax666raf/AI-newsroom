@@ -1,5 +1,3 @@
-"""llm_client.py - LLM client using Mistral API."""
-
 from __future__ import annotations
 
 import logging
@@ -24,7 +22,7 @@ class LocalLLMClient:
         if not MISTRAL_API_KEY:
             raise ValueError("MISTRAL_API_KEY not set in environment")
         self.api_key = MISTRAL_API_KEY
-        self.endpoint = f"{MISTRAL_BASE_URL}/messages"
+        self.endpoint = f"{MISTRAL_BASE_URL}/chat/completions"
         self.model = MODEL_NAME
 
     def generate(self, prompt: str) -> str:
