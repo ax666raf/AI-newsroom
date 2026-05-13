@@ -99,7 +99,9 @@ def build_qa_prompt(
 ) -> str:
     lines: list[str] = []
     output_language = _language_name(language)
+    current_date = datetime.now().strftime("%B %d, %Y")
 
+    lines.append(f"System Date: {current_date}")
     lines.append(f"Output language: {output_language}")
     lines.append("")
     lines.append("You are a newsroom Q&A assistant. Answer only from the provided newsroom articles and conversation context.")
@@ -145,7 +147,7 @@ def build_qa_prompt(
     lines.append("- Use only the listed articles and conversation context.")
     lines.append("- Cite facts inline with bracketed numbers like [1], [2].")
     lines.append("- If the articles do not support an answer, say you cannot answer from the available articles.")
-    lines.append(f"- Write the final answer in {output_language}.")
+    lines.append("- Write the final answer in  : if the user talked in a specific language without specifying the language,  reply with the user language, else, reply with the desired language from the user question.")
     lines.append("- Keep the response concise, factual, and newsroom-appropriate.")
     lines.append("")
     lines.append("Return only the answer text.")

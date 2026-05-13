@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { askNewsroomQuestion } from "../services/api";
-import editIcon from "../edit.png";
-import msgIcon from "../msg.png";
+import { FiMessageSquare } from "react-icons/fi";
 
 // Inject Google Fonts
 const fontLink = document.createElement("link");
@@ -35,19 +34,10 @@ const SUGGESTED_TOPICS = [
       description: "Explore international events and geopolitics",
       prompt: "Give me an overview of the latest global affairs and international events.",
     },
-    {
-      id: 3,
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
-      ),
-  },
+    
 ];
 
-const HISTORY = [
-  { section: "Yesterday", items: ["Platform Marketplace 101", "Give me a proposal for company…", "Can you write a short paragraph f…", "Research about ui ux"] },
-  { section: "Last Week", items: ["Platform Marketplace 101", "Give me a proposal for company…"] },
-  { section: "Last Month", items: ["Platform Marketplace 101", "Give me a proposal for company…"] },
-];
+const HISTORY = []
 
 function TypingDots() {
   return (
@@ -185,10 +175,15 @@ export default function NewsroomChatbot() {
         content: m.content,
       }));
 
+      // Automatically detect Arabic or French text to set the language parameter
+      const isArabic = /[\u0600-\u06FF]/.test(text);
+      const isFrench = /\b(le|la|les|un|une|des|est|sont|que|qui|pourquoi|comment|quand|où|quel|quelle|bonjour)\b/i.test(text);
+      const language = isArabic ? "ar" : (isFrench ? "fr" : "en");
+
       const data = await askNewsroomQuestion({
         question: text,
         history,
-        language: "en"
+        language: language
       });
 
       const raw = data.answer || "I couldn't retrieve that information right now.";
@@ -262,7 +257,7 @@ export default function NewsroomChatbot() {
                   onMouseEnter={e => { if (activeChatId !== c.id) e.currentTarget.style.backgroundColor = "#3a3628"; }}
                   onMouseLeave={e => { if (activeChatId !== c.id) e.currentTarget.style.backgroundColor = "transparent"; }}
                 >
-                  <img src={msgIcon} alt="msg" className="w-4 h-4 inline-block mr-1 opacity-70" /> {c.title}
+                  <FiMessageSquare className="w-4 h-4 inline-block mr-2 opacity-70" /> {c.title}
                 </button>
               ))}
             </div>
@@ -281,7 +276,7 @@ export default function NewsroomChatbot() {
                   onMouseEnter={e => e.currentTarget.style.backgroundColor = "#3a3628"}
                   onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
                 >
-                  <img src={msgIcon} alt="msg" className="w-4 h-4 inline-block flex-shrink-0 opacity-70" /> 
+                  <FiMessageSquare className="w-4 h-4 inline-block flex-shrink-0 opacity-70" /> 
                   <span className="truncate">{item}</span>
                 </button>
               ))}
@@ -311,22 +306,7 @@ export default function NewsroomChatbot() {
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            {hasMessages && (
-              <button className="text-xs px-3 py-1.5 rounded-lg border transition-colors"
-                style={{ borderColor: "#d5cfc2", color: "#7a7060", backgroundColor: "transparent" }}
-                onMouseEnter={e => e.currentTarget.style.backgroundColor = "#ede8dc"}
-                onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
-              >
-                <img src={editIcon} alt="edit" className="w-3.5 h-3.5 inline-block mr-1 opacity-70" />
-                Edit
-              </button>
-            )}
-            <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
-              style={{ backgroundColor: "#9b8e7a", color: "#f5f0e8" }}>
-              A
-            </div>
-          </div>
+          
         </div>
 
         {/* Chat / Welcome */}

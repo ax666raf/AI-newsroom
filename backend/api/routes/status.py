@@ -1,10 +1,18 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from backend.database.db import get_db
 from backend.database.models import CollectionLog
+from backend.pipeline.runner import run_pipeline
 
 router = APIRouter()
+
+
+@router.post("/run")
+def trigger_pipeline(background_tasks: BackgroundTasks):
+    """Manually trigger the data collection pipeline in the background."""
+    background_tasks.add_task(run_pipeline)
+    return {"message": "Pipeline triggered successfully and is running in the background."}
 
 
 @router.get("")

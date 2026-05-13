@@ -57,7 +57,7 @@ def answer_newsroom_question(
         cleaned_question,
         limit=limit,
         hours_back=hours_back,
-        similarity_threshold=0.20,
+        similarity_threshold=0.10,
     )
 
     print(f"[QA DEBUG] Vector DB returned {len(sources)} sources.")
